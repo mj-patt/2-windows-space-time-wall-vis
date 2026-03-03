@@ -1,0 +1,23 @@
+{
+    "name": "2-windows-prot",
+    "private": true,
+    "version": "1.0.0",
+    "description": "Two-window Tominski wall prototype",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "dev:open": "vite --open",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "vite": "^5.0.0"
+    },
+    "dependencies": {
+        "vega": "^6.2.0",
+        "vega-embed": "^7.1.0"
+    }
+}
