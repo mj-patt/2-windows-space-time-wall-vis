@@ -49,6 +49,29 @@ const ROUTE_POINTS = [
   },
 ];
 
+//for line graph
+const EU_LINE_CHART_COUNTRIES = [
+  "Austria",
+  "Belgium",
+  "Bulgaria",
+  "Czech Republic",
+  "Denmark",
+  "Finland",
+  "France",
+  "Germany",
+  "Greece",
+  "Hungary",
+  "Ireland",
+  "Italy",
+  "Luxembourg",
+  "Netherlands",
+  "Poland",
+  "Portugal",
+  "Romania",
+  "Slovakia",
+  "Spain",
+  "Sweden",
+];
 const COUNTRIES = ["Portugal", "Spain", "France", "Germany", "Poland"];
 const COUNTRY_ID_BY_NAME = {
   Portugal: 620,
@@ -119,6 +142,144 @@ function computeXCoords(width, height) {
 }
 
 //vega spec
+
+// line graph EU countries with complete data from 1994–2024
+function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
+  const chartData = unemploymentData
+    .filter(
+      (d) =>
+        EU_LINE_CHART_COUNTRIES.includes(d.country) &&
+        d.year >= 1994 &&
+        d.year <= 2024
+    )
+    .map((d) => ({
+      country: String(d.country),
+      year: Number(d.year),
+      rate: Number(d.rate),
+    }));
+
+  return {
+    $schema: "https://vega.github.io/schema/vega/v5.json",
+    width: (containerWidth || 900) - 32 - 55 - 150,
+    height: (containerHeight || 500) - 20 - 40,
+    padding: { left: 55, right: 150, top: 20, bottom: 40 },
+    autosize: "none",
+    background: "#ffffff",
+
+    data: [
+      {
+        name: "chartData",
+        values: chartData,
+      },
+    ],
+
+    scales: [
+      {
+        name: "x",
+        type: "point",
+        domain: [
+          1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004,
+          2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015,
+          2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024,
+        ],
+        range: "width",
+      },
+      // {
+      //   name: "x",
+      //   type: "point",
+      //   domain: [1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022, 2024],
+      //   range: "width",
+      // },
+      {
+        name: "y",
+        type: "linear",
+        domain: [0, 30],
+        range: "height",
+        nice: true,
+      },
+      {
+        name: "color",
+        type: "ordinal",
+        domain: EU_LINE_CHART_COUNTRIES,
+        range: { scheme: "tableau20" },
+      },
+    ],
+
+    axes: [
+      // {
+      //   orient: "bottom",
+      //   scale: "x",
+      //   tickCount: 10,
+      //   format: "d",
+      //   grid: false,
+      //   labelFontSize: 10,
+      // },
+      {
+        orient: "bottom",
+        scale: "x",
+        values: [1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022, 2024],
+        labelAngle: -45,
+        labelAlign: "right",
+        labelFontSize: 12,
+      },
+      {
+        orient: "left",
+        scale: "y",
+        tickCount: 7,
+        grid: true,
+        gridColor: "#e0e0e0",
+        labelFontSize: 12,
+        title: "Unemployment Rate (%)",
+        titleFontSize: 14,
+        titlePadding: 10,
+      },
+    ],
+
+    legends: [
+      {
+        fill: "color",
+        stroke: "color",
+        orient: "right",
+        title: null,
+        labelFontSize: 15,
+        symbolType: "stroke",
+        symbolStrokeWidth: 2,
+      },
+    ],
+
+    marks: [
+      {
+        type: "group",
+        from: {
+          facet: {
+            name: "byCountry",
+            data: "chartData",
+            groupby: "country",
+          },
+        },
+        marks: [
+          {
+            type: "line",
+            from: { data: "byCountry" },
+            encode: {
+              enter: {
+                x: { scale: "x", field: "year" },
+                y: { scale: "y", field: "rate" },
+                stroke: { scale: "color", field: "country" },
+                strokeWidth: { value: 1.5 },
+                strokeOpacity: { value: 0.85 },
+                tooltip: {
+                  signal:
+                    "{'Country': datum.country, 'Year': datum.year, 'Rate': format(datum.rate, '.1f') + '%'}",
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
 
 function buildMapSpec(topoData, mapW, mapH, selectedCountries) {
   const selectedCountryIds = Array.isArray(selectedCountries)
@@ -299,9 +460,7 @@ function buildWallSpec(
     },
     background: "#ffffff",
 
-    data: [
-      { name: "bricks", values: bricks },
-    ],
+    data: [{ name: "bricks", values: bricks }],
 
     scales: [
       {
@@ -403,73 +562,150 @@ async function initMap() {
     }, 200);
   });
 }
-
-//window 2 (wall)
-
 async function initWall() {
   const unemploymentData = await loadUnemployment();
 
   const ch = new BroadcastChannel(CHANNEL_NAME);
   const win2El = document.getElementById("win2");
+  const titleEl = document.getElementById("win2-title");
 
-  let wallEmbedResult = null;
+  let embedResult = null;
   let selectedCountries = [];
+  let mode = "linechart"; // default state
 
-  // return { w: window.innerWidth || 900, h: window.innerHeight || 400 };
   function getWallSize() {
-    const titleHeight = 70; // adjust title area
+    const titleHeight = 70;
     return {
       w: window.innerWidth || 900,
       h: (window.innerHeight || 400) - titleHeight,
     };
   }
 
-  async function renderWall() {
-    const { w, h } = getWallSize();
-    //compute projected x-coords directly — no map window needed
-    const xCoords = computeXCoords(w, h);
-    const spec = buildWallSpec(
-      xCoords,
-      unemploymentData,
-      selectedCountries,
-      h,
-      w
-    );
+  function updateTitle() {
+    if (!titleEl) return;
+    titleEl.textContent =
+      mode === "linechart"
+        ? "EU Unemployment Rate 1994–2024"
+        : "Great Wall of Space–Time  ·  Unemployment Rate 1994–2024";
+  }
 
-    if (wallEmbedResult) wallEmbedResult.view.finalize();
-    wallEmbedResult = await vegaEmbed(win2El, spec, {
+  async function render() {
+    const { w, h } = getWallSize();
+    const spec =
+      mode === "linechart"
+        ? buildLineChartSpec(unemploymentData, w, h)
+        : buildWallSpec(
+            computeXCoords(w, h),
+            unemploymentData,
+            selectedCountries,
+            h,
+            w
+          );
+
+    if (embedResult) embedResult.view.finalize();
+    embedResult = await vegaEmbed(win2El, spec, {
       renderer: "canvas",
       actions: false,
     });
 
-    wallEmbedResult.view.addEventListener("click", (_event, item) => {
+    embedResult.view.addEventListener("click", (_event, item) => {
       if (!item || item.mark.type !== "rect") return;
       const country = item.datum.country;
+      if (!country) return;
       const alreadySelected = selectedCountries.includes(country);
       selectedCountries = alreadySelected
         ? selectedCountries.filter((ctry) => ctry !== country)
         : [...selectedCountries, country];
       ch.postMessage({ type: "select", selectedCountries });
-      renderWall();
+      render();
     });
+
+    updateTitle();
   }
 
-  //0nly listen for selection changes from the map window
   ch.onmessage = (e) => {
     if (e.data.type === "select") {
       selectedCountries = e.data.selectedCountries || [];
-      renderWall();
+      mode = selectedCountries.length > 0 ? "wall" : "linechart";
+      render();
     }
   };
 
-  await renderWall();
+  await render();
 
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => renderWall(), 200);
+    resizeTimer = setTimeout(() => render(), 200);
   });
 }
+
+//window 2 (wall)
+
+// async function initWall() {
+//   const unemploymentData = await loadUnemployment();
+
+//   const ch = new BroadcastChannel(CHANNEL_NAME);
+//   const win2El = document.getElementById("win2");
+
+//   let wallEmbedResult = null;
+//   let selectedCountries = [];
+
+//   // return { w: window.innerWidth || 900, h: window.innerHeight || 400 };
+//   function getWallSize() {
+//     const titleHeight = 70; // adjust title area
+//     return {
+//       w: window.innerWidth || 900,
+//       h: (window.innerHeight || 400) - titleHeight,
+//     };
+//   }
+
+//   async function renderWall() {
+//     const { w, h } = getWallSize();
+//     //compute projected x-coords directly — no map window needed
+//     const xCoords = computeXCoords(w, h);
+//     const spec = buildWallSpec(
+//       xCoords,
+//       unemploymentData,
+//       selectedCountries,
+//       h,
+//       w
+//     );
+
+//     if (wallEmbedResult) wallEmbedResult.view.finalize();
+//     wallEmbedResult = await vegaEmbed(win2El, spec, {
+//       renderer: "canvas",
+//       actions: false,
+//     });
+
+//     wallEmbedResult.view.addEventListener("click", (_event, item) => {
+//       if (!item || item.mark.type !== "rect") return;
+//       const country = item.datum.country;
+//       const alreadySelected = selectedCountries.includes(country);
+//       selectedCountries = alreadySelected
+//         ? selectedCountries.filter((ctry) => ctry !== country)
+//         : [...selectedCountries, country];
+//       ch.postMessage({ type: "select", selectedCountries });
+//       renderWall();
+//     });
+//   }
+
+//   //0nly listen for selection changes from the map window
+//   ch.onmessage = (e) => {
+//     if (e.data.type === "select") {
+//       selectedCountries = e.data.selectedCountries || [];
+//       renderWall();
+//     }
+//   };
+
+//   await renderWall();
+
+//   let resizeTimer;
+//   window.addEventListener("resize", () => {
+//     clearTimeout(resizeTimer);
+//     resizeTimer = setTimeout(() => renderWall(), 200);
+//   });
+// }
 
 const windowType = document.body.dataset.window;
 if (windowType === "map") initMap();
