@@ -50,6 +50,16 @@ const ROUTE_POINTS = [
 ];
 
 const COUNTRIES = ["Portugal", "Spain", "France", "Germany", "Poland"];
+const COUNTRY_ID_BY_NAME = {
+  Portugal: 620,
+  Spain: 724,
+  France: 250,
+  Germany: 276,
+  Poland: 616,
+};
+const COUNTRY_NAME_BY_ID = Object.fromEntries(
+  Object.entries(COUNTRY_ID_BY_NAME).map(([name, id]) => [id, name])
+);
 
 const CHANNEL_NAME = "great-wall";
 
@@ -110,7 +120,12 @@ function computeXCoords(width, height) {
 
 //vega spec
 
-function buildMapSpec(topoData, mapW, mapH, selectedUpTo) {
+function buildMapSpec(topoData, mapW, mapH, selectedCountries) {
+  const selectedCountryIds = Array.isArray(selectedCountries)
+    ? selectedCountries
+        .map((name) => COUNTRY_ID_BY_NAME[name])
+        .filter((id) => typeof id === "number")
+    : [];
   return {
     $schema: "https://vega.github.io/schema/vega/v5.json",
     width: mapW,
@@ -121,8 +136,8 @@ function buildMapSpec(topoData, mapW, mapH, selectedUpTo) {
 
     signals: [
       {
-        name: "selectedUpTo",
-        value: selectedUpTo !== null ? selectedUpTo : -1,
+        name: "selectedCountryIds",
+        value: selectedCountryIds,
       },
     ],
 
@@ -131,48 +146,6 @@ function buildMapSpec(topoData, mapW, mapH, selectedUpTo) {
         name: "countries",
         values: topoData,
         format: { type: "topojson", feature: "countries" },
-        transform: [
-          { type: "filter", expr: "true" },
-          {
-            type: "formula",
-            as: "isFocus",
-            expr: "indexof([620,724,250,276,616], toNumber(datum.id)) >= 0",
-          },
-        ],
-      },
-      {
-        name: "routePoints",
-        values: ROUTE_POINTS,
-        transform: [
-          {
-            type: "geopoint",
-            projection: "proj",
-            fields: ["lon", "lat"],
-            as: ["x", "y"],
-          },
-        ],
-      },
-      {
-        name: "routeSegments",
-        source: "routePoints",
-        transform: [
-          { type: "collect", sort: { field: "idx", order: "ascending" } },
-          {
-            type: "window",
-            ops: ["lead", "lead"],
-            fields: ["x", "y"],
-            as: ["x2", "y2"],
-          },
-          {
-            type: "filter",
-            expr: "isValid(datum.x2) && isValid(datum.y2) && isValid(datum.segCountry)",
-          },
-          {
-            type: "formula",
-            as: "pixDist",
-            expr: "hypot(datum.x2 - datum.x, datum.y2 - datum.y)",
-          },
-        ],
       },
     ],
 
@@ -211,74 +184,11 @@ function buildMapSpec(topoData, mapW, mapH, selectedUpTo) {
           enter: { stroke: { value: "#000000" }, strokeWidth: { value: 0.7 } },
           update: {
             fill: [
-              { test: "datum.isFocus", value: "#c8d8f0" },
+              {
+                test: "indexof(selectedCountryIds, toNumber(datum.id)) >= 0",
+                value: "#a9d3ff",
+              },
               { value: "#4a5a6a" },
-            ],
-          },
-        },
-      },
-      {
-        name: "segVis",
-        type: "rule",
-        from: { data: "routeSegments" },
-        encode: {
-          enter: {
-            x: { field: "x" },
-            y: { field: "y" },
-            x2: { field: "x2" },
-            y2: { field: "y2" },
-            strokeCap: { value: "round" },
-          },
-          update: {
-            strokeWidth: { value: 7.5 },
-            stroke: [
-              {
-                // test: "indexof(['Portugal','Spain','France','Germany','Poland'], datum.segCountry) <= selectedUpTo",
-                test: "datum.segCountry !== null && indexof(['Portugal','Spain','France','Germany','Poland'], datum.segCountry) <= selectedUpTo",
-                value: "#4a90d9",
-              },
-              { value: "#7b2d8b" },
-            ],
-          },
-        },
-      },
-      {
-        name: "segHit",
-        type: "rule",
-        from: { data: "routeSegments" },
-        encode: {
-          enter: {
-            x: { field: "x" },
-            y: { field: "y" },
-            x2: { field: "x2" },
-            y2: { field: "y2" },
-            stroke: { value: "transparent" },
-            strokeWidth: { value: 22 },
-            cursor: { value: "pointer" },
-            tooltip: { signal: "{'Country': datum.segCountry}" },
-          },
-        },
-      },
-      {
-        name: "points",
-        type: "symbol",
-        from: { data: "routePoints" },
-        encode: {
-          enter: {
-            x: { field: "x" },
-            y: { field: "y" },
-            size: { value: 350 },
-            fill: { value: "white" },
-            strokeWidth: { value: 5 },
-          },
-          update: {
-            stroke: [
-              {
-                // test: "indexof(['Portugal','Spain','France','Germany','Poland'], datum.segCountry) <= selectedUpTo",
-                test: "datum.idx === 1 && selectedUpTo >= 0 || datum.idx - 2 <= selectedUpTo && datum.idx - 2 >= 0",
-                value: "#4a90d9",
-              },
-              { value: "#7b2d8b" },
             ],
           },
         },
@@ -294,11 +204,11 @@ const WALL_PADDING_RIGHT = 50;
 function buildWallSpec(
   xCoords,
   unemploymentData,
-  selectedUpTo,
+  selectedCountries,
   wallHeight,
   containerWidth
 ) {
-  // selectedUpTo: null = show all, 0 = Portugal only, 1 = PT+ES, ... 4 = all
+  // selectedCountries: [] = show all, otherwise only show selected country columns
   const vegaPad = 16;
   // const targetWidth = (containerWidth || 900) - vegaPad;
   const targetWidth =
@@ -322,6 +232,8 @@ function buildWallSpec(
     x2: xCoords[i + 1],
   }));
 
+  const selectedCountrySet = new Set(selectedCountries || []);
+  const hasSelection = selectedCountrySet.size > 0;
   const bricks = [];
   for (let si = 0; si < segMetrics.length; si++) {
     const seg = segMetrics[si];
@@ -329,7 +241,7 @@ function buildWallSpec(
     const wx2 = toWall(xCoords[si + 1]);
     const scaledW = wx2 - wx1;
     const cData = unemploymentData.filter((d) => d.country === seg.country);
-    const isVisible = selectedUpTo === null || si <= selectedUpTo;
+    const isVisible = hasSelection && selectedCountrySet.has(seg.country);
     for (let yi = 0; yi < years.length; yi++) {
       const yr = years[yi];
       const rec = cData.find((d) => d.year === yr);
@@ -345,25 +257,7 @@ function buildWallSpec(
       });
     }
   }
-
-  const routePtsClean = xCoords.map((mx, i) => ({
-    x: toWall(mx),
-    label: ROUTE_POINTS[i].label,
-    country: ROUTE_POINTS[i].segCountry,
-    ptIdx: i,
-  }));
-
-  const routeSegs = [];
-  for (let i = 0; i < routePtsClean.length - 1; i++) {
-    routeSegs.push({
-      x1: routePtsClean[i].x,
-      x2: routePtsClean[i + 1].x,
-      country: routePtsClean[i].country,
-      segIdx: i,
-    });
-  }
-
-  const wallY = nYears * brickH - 8;
+  const wallHeightPx = nYears * brickH - 8;
 
   const labelMarks = COUNTRIES.map((ctry) => {
     const si = segMetrics.findIndex((s) => s.country === ctry);
@@ -395,7 +289,7 @@ function buildWallSpec(
   return {
     $schema: "https://vega.github.io/schema/vega/v5.json",
     width: Math.round(targetWidth),
-    height: wallY + 30,
+    height: wallHeightPx + 30,
 
     padding: {
       left: WALL_PADDING_LEFT,
@@ -407,8 +301,6 @@ function buildWallSpec(
 
     data: [
       { name: "bricks", values: bricks },
-      { name: "routeSegs", values: routeSegs },
-      { name: "routePts", values: routePtsClean },
     ],
 
     scales: [
@@ -449,74 +341,6 @@ function buildWallSpec(
       },
 
       ...labelMarks,
-
-      {
-        type: "rule",
-        from: { data: "routeSegs" },
-        encode: {
-          enter: {
-            x: { field: "x1" },
-            x2: { field: "x2" },
-            y: { value: wallY },
-            y2: { value: wallY },
-            strokeWidth: { value: 30 },
-          },
-          update: {
-            stroke: [
-              {
-                test: `datum.segIdx <= ${
-                  selectedUpTo !== null ? selectedUpTo : -1
-                }`,
-                value: "#4a90d9",
-              },
-              { value: "#7b2d8b" },
-            ],
-            opacity: [
-              {
-                test: `datum.segIdx <= ${
-                  selectedUpTo !== null ? selectedUpTo : -1
-                }`,
-                value: 1,
-              },
-              { value: 1 },
-            ],
-          },
-        },
-      },
-
-      {
-        type: "symbol",
-        from: { data: "routePts" },
-        encode: {
-          enter: {
-            x: { field: "x" },
-            y: { value: wallY },
-            size: { value: 650 },
-            fill: { value: "white" },
-            strokeWidth: { value: 5 },
-          },
-          update: {
-            stroke: [
-              {
-                test: `datum.ptIdx <= ${
-                  selectedUpTo !== null ? selectedUpTo + 1 : -1
-                }`,
-                value: "#4a90d9",
-              },
-              { value: "#7b2d8b" },
-            ],
-            opacity: [
-              {
-                test: `datum.ptIdx <= ${
-                  selectedUpTo !== null ? selectedUpTo + 1 : -1
-                }`,
-                value: 1,
-              },
-              { value: 1 },
-            ],
-          },
-        },
-      },
     ],
   };
 }
@@ -531,7 +355,7 @@ async function initMap() {
   const appEl = document.getElementById("app");
 
   let mapView = null;
-  let selectedUpTo = null; // null=all visible, 0=PT only, 1=PT+ES, ...
+  let selectedCountries = [];
 
   function getMapSize() {
     const h = appEl.clientHeight;
@@ -540,7 +364,7 @@ async function initMap() {
 
   async function renderMap() {
     const { w, h } = getMapSize();
-    const spec = buildMapSpec(topoData, w, h, selectedUpTo);
+    const spec = buildMapSpec(topoData, w, h, selectedCountries);
     if (mapView) mapView.finalize();
     const res = await vegaEmbed(win1El, spec, {
       renderer: "canvas",
@@ -548,36 +372,15 @@ async function initMap() {
     });
     mapView = res.view;
 
-    // mapView.addEventListener("click", async (_event, item) => {
-    //   if (!item || item.mark.name !== "points") return;
-    //   const clickedUpTo = item.datum.idx - 2;
-    //   selectedUpTo = selectedUpTo === clickedUpTo ? null : clickedUpTo;
-    //   ch.postMessage({ type: "select", selectedUpTo });
-    //   await renderMap();
-    // });
     mapView.addEventListener("click", async (_event, item) => {
-      if (!item) return;
-      let clickedUpTo;
-      if (item.mark.name === "points") {
-        clickedUpTo = item.datum.idx - 2;
-      } else if (item.mark.name === "segHit") {
-        clickedUpTo = COUNTRIES.indexOf(item.datum.segCountry);
-      } else if (item.mark.name === "mapShape") {
-        const countryNames = {
-          620: "Portugal",
-          724: "Spain",
-          250: "France",
-          276: "Germany",
-          616: "Poland",
-        };
-        const name = countryNames[item.datum.id];
-        if (!name) return;
-        clickedUpTo = COUNTRIES.indexOf(name);
-      } else {
-        return;
-      }
-      selectedUpTo = selectedUpTo === clickedUpTo ? null : clickedUpTo;
-      ch.postMessage({ type: "select", selectedUpTo });
+      if (!item || item.mark.name !== "mapShape") return;
+      const name = COUNTRY_NAME_BY_ID[item.datum.id];
+      if (!name) return;
+      const alreadySelected = selectedCountries.includes(name);
+      selectedCountries = alreadySelected
+        ? selectedCountries.filter((ctry) => ctry !== name)
+        : [...selectedCountries, name];
+      ch.postMessage({ type: "select", selectedCountries });
       await renderMap();
     });
   }
@@ -585,7 +388,7 @@ async function initMap() {
   //only listen for selection changes from the wall window
   ch.onmessage = (e) => {
     if (e.data.type === "select") {
-      selectedUpTo = e.data.selectedUpTo;
+      selectedCountries = e.data.selectedCountries || [];
       renderMap();
     }
   };
@@ -610,7 +413,7 @@ async function initWall() {
   const win2El = document.getElementById("win2");
 
   let wallEmbedResult = null;
-  let selectedUpTo = null;
+  let selectedCountries = [];
 
   // return { w: window.innerWidth || 900, h: window.innerHeight || 400 };
   function getWallSize() {
@@ -625,7 +428,13 @@ async function initWall() {
     const { w, h } = getWallSize();
     //compute projected x-coords directly — no map window needed
     const xCoords = computeXCoords(w, h);
-    const spec = buildWallSpec(xCoords, unemploymentData, selectedUpTo, h, w);
+    const spec = buildWallSpec(
+      xCoords,
+      unemploymentData,
+      selectedCountries,
+      h,
+      w
+    );
 
     if (wallEmbedResult) wallEmbedResult.view.finalize();
     wallEmbedResult = await vegaEmbed(win2El, spec, {
@@ -635,9 +444,12 @@ async function initWall() {
 
     wallEmbedResult.view.addEventListener("click", (_event, item) => {
       if (!item || item.mark.type !== "rect") return;
-      const clickedUpTo = COUNTRIES.indexOf(item.datum.country);
-      selectedUpTo = selectedUpTo === clickedUpTo ? null : clickedUpTo;
-      ch.postMessage({ type: "select", selectedUpTo });
+      const country = item.datum.country;
+      const alreadySelected = selectedCountries.includes(country);
+      selectedCountries = alreadySelected
+        ? selectedCountries.filter((ctry) => ctry !== country)
+        : [...selectedCountries, country];
+      ch.postMessage({ type: "select", selectedCountries });
       renderWall();
     });
   }
@@ -645,7 +457,7 @@ async function initWall() {
   //0nly listen for selection changes from the map window
   ch.onmessage = (e) => {
     if (e.data.type === "select") {
-      selectedUpTo = e.data.selectedUpTo;
+      selectedCountries = e.data.selectedCountries || [];
       renderWall();
     }
   };
