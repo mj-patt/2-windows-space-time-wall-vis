@@ -49,7 +49,7 @@ const ROUTE_POINTS = [
   },
 ];
 
-//for line graph
+//for eu line graph and chloropleth
 const EU_LINE_CHART_COUNTRIES = [
   "Austria",
   "Belgium",
@@ -72,6 +72,37 @@ const EU_LINE_CHART_COUNTRIES = [
   "Spain",
   "Sweden",
 ];
+const EU_COUNTRY_IDS = {
+  Austria: 40,
+  Belgium: 56,
+  Bulgaria: 100,
+  Croatia: 191,
+  Cyprus: 196,
+  "Czech Republic": 203,
+  Denmark: 208,
+  Estonia: 233,
+  Finland: 246,
+  France: 250,
+  Germany: 276,
+  Greece: 300,
+  Hungary: 348,
+  Ireland: 372,
+  Italy: 380,
+  Latvia: 428,
+  Lithuania: 440,
+  Luxembourg: 442,
+  Malta: 470,
+  Netherlands: 528,
+  Poland: 616,
+  Portugal: 620,
+  Romania: 642,
+  Slovakia: 703,
+  Slovenia: 705,
+  Spain: 724,
+  Sweden: 752,
+};
+
+//for the space time vis
 const COUNTRIES = ["Portugal", "Spain", "France", "Germany", "Poland"];
 const COUNTRY_ID_BY_NAME = {
   Portugal: 620,
@@ -93,6 +124,12 @@ const PROJ_SCALE_K = 1.65; // scale = width * PROJ_SCALE_K, zoom — bigger = mo
 const PROJ_TX_K = 0.5; // translateX = width * PROJ_TX_K, horizontal crop - shifts the whole map left/right
 const PROJ_TY_K = 1 / 2.7; // translateY = height * PROJ_TY_K, vertical crop - shifts the whole map up/down
 
+//for choropleth
+const PROJ_CENTER2 = [7.75, 48.5]; //pan the map left/right/up/down
+const PROJ_SCALE_K2 = 1.4; // scale = width * PROJ_SCALE_K, zoom — bigger = more zoomed in
+const PROJ_TX_K2 = 0.45; // translateX = width * PROJ_TX_K, horizontal crop - shifts the whole map left/right
+const PROJ_TY_K2 = 1 / 2.7; // translateY = height * PROJ_TY_K, vertical crop - shifts the whole map up/down
+
 // load data
 
 async function loadTopoJSON() {
@@ -108,6 +145,19 @@ async function loadUnemployment() {
   return rows.map((line) => {
     const [, country, year, rate] = line.split(",");
     return { country: country.trim(), year: +year, rate: +rate };
+  });
+}
+
+async function loadUnemploymentChoropleth() {
+  const res = await fetch("/data/unemployment.csv");
+  const text = await res.text();
+  const rows = text.trim().split(/\r?\n/).slice(1);
+  return rows.map((line) => {
+    const parts = line.split(",");
+    const country = parts[1].trim();
+    const year = +parts[2].trim();
+    const rate = parts[3] ? +parts[3].trim() : null;
+    return { country, year, rate };
   });
 }
 
@@ -143,7 +193,190 @@ function computeXCoords(width, height) {
 
 //vega spec
 
-// line graph EU countries with complete data from 1994–2024
+//chloropleth
+// window 3 (choropleth)
+
+function buildChoroplethSpec(topoData, unemploymentData, year, w, h) {
+  const rateByCountryName = {};
+  unemploymentData
+    .filter((d) => d.year === year)
+    .forEach((d) => {
+      rateByCountryName[d.country] = d.rate;
+    });
+
+  const rateValues = Object.entries(EU_COUNTRY_IDS).map(([name, id]) => ({
+    id: String(id),
+    rate: rateByCountryName[name] ?? null,
+  }));
+
+  return {
+    $schema: "https://vega.github.io/schema/vega/v5.json",
+    width: w,
+    height: h,
+    autosize: "none",
+    background: "#dce8f0",
+
+    signals: [{ name: "selectedYear", value: year }],
+
+    data: [
+      {
+        name: "countries",
+        values: topoData,
+        format: { type: "topojson", feature: "countries" },
+      },
+      {
+        name: "rates",
+        values: rateValues,
+      },
+      {
+        name: "joined",
+        source: "countries",
+        transform: [
+          {
+            type: "lookup",
+            from: "rates",
+            key: "id",
+            fields: ["id"],
+            values: ["rate"],
+            as: ["rate"],
+          },
+        ],
+      },
+    ],
+
+    projections: [
+      {
+        name: "proj",
+        type: "mercator",
+        center: PROJ_CENTER2,
+        scale: w * PROJ_SCALE_K2,
+        translate: [w * PROJ_TX_K2, h * PROJ_TY_K2],
+      },
+    ],
+
+    scales: [
+      {
+        name: "color",
+        type: "sequential",
+        domain: [0, 30],
+        range: { scheme: "orangered" },
+        zero: true,
+      },
+    ],
+
+    legends: [
+      {
+        fill: "color",
+        orient: "bottom-left",
+        title: "Unemployment Rate (%)",
+        direction: "horizontal",
+        titleFontSize: 11,
+        labelFontSize: 10,
+        gradientLength: 120,
+        gradientThickness: 12,
+      },
+    ],
+
+    marks: [
+      {
+        type: "shape",
+        from: { data: "countries" },
+        transform: [{ type: "geoshape", projection: "proj" }],
+        encode: {
+          enter: {
+            fill: { value: "#b0bec5" },
+            stroke: { value: "#ffffff" },
+            strokeWidth: { value: 0.5 },
+          },
+        },
+      },
+      {
+        name: "choropleth",
+        type: "shape",
+        from: { data: "joined" },
+        transform: [{ type: "geoshape", projection: "proj" }],
+        encode: {
+          update: {
+            fill: [
+              { test: "datum.rate == null", value: "#b0bec5" },
+              { scale: "color", field: "rate" },
+            ],
+            stroke: { value: "#ffffff" },
+            strokeWidth: { value: 0.6 },
+            tooltip: {
+              signal:
+                "datum.rate != null ? {'Country': datum.properties.name, 'Year': selectedYear, 'Unemployment': format(datum.rate, '.1f') + '%'} : {'Country': datum.properties.name, 'Note': 'No data'}",
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+async function initChoropleth() {
+  const [topoData, unemploymentData] = await Promise.all([
+    loadTopoJSON(),
+    loadUnemploymentChoropleth(),
+  ]);
+
+  const containerEl = document.getElementById("win3");
+  const sliderEl = document.getElementById("year-slider");
+  const yearDisplayEl = document.getElementById("year-display");
+
+  let embedResult = null;
+  let currentYear = 1994;
+
+  function getSizeChoro() {
+    const headerHeight = document.getElementById("header").offsetHeight;
+    const sliderHeight = document.getElementById("slider-wrap").offsetHeight;
+    return {
+      w: window.innerWidth,
+      h: window.innerHeight - headerHeight - sliderHeight,
+    };
+  }
+
+  async function renderChoropleth() {
+    const { w, h } = getSizeChoro();
+
+    const spec = buildChoroplethSpec(
+      topoData,
+      unemploymentData,
+      currentYear,
+      w,
+      h
+    );
+
+    if (embedResult) {
+      embedResult.view.finalize();
+    }
+
+    containerEl.style.transform = "";
+    containerEl.style.transformOrigin = "";
+
+    embedResult = await vegaEmbed(containerEl, spec, {
+      renderer: "canvas",
+      actions: false,
+    });
+  }
+
+  sliderEl.addEventListener("input", () => {
+    currentYear = +sliderEl.value;
+    yearDisplayEl.textContent = currentYear;
+    renderChoropleth();
+  });
+
+  await renderChoropleth();
+
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      renderChoropleth();
+    }, 200);
+  });
+}
+
 function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
   const chartData = unemploymentData
     .filter(
@@ -206,14 +439,6 @@ function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
     ],
 
     axes: [
-      // {
-      //   orient: "bottom",
-      //   scale: "x",
-      //   tickCount: 10,
-      //   format: "d",
-      //   grid: false,
-      //   labelFontSize: 10,
-      // },
       {
         orient: "bottom",
         scale: "x",
@@ -640,73 +865,7 @@ async function initWall() {
   });
 }
 
-//window 2 (wall)
-
-// async function initWall() {
-//   const unemploymentData = await loadUnemployment();
-
-//   const ch = new BroadcastChannel(CHANNEL_NAME);
-//   const win2El = document.getElementById("win2");
-
-//   let wallEmbedResult = null;
-//   let selectedCountries = [];
-
-//   // return { w: window.innerWidth || 900, h: window.innerHeight || 400 };
-//   function getWallSize() {
-//     const titleHeight = 70; // adjust title area
-//     return {
-//       w: window.innerWidth || 900,
-//       h: (window.innerHeight || 400) - titleHeight,
-//     };
-//   }
-
-//   async function renderWall() {
-//     const { w, h } = getWallSize();
-//     //compute projected x-coords directly — no map window needed
-//     const xCoords = computeXCoords(w, h);
-//     const spec = buildWallSpec(
-//       xCoords,
-//       unemploymentData,
-//       selectedCountries,
-//       h,
-//       w
-//     );
-
-//     if (wallEmbedResult) wallEmbedResult.view.finalize();
-//     wallEmbedResult = await vegaEmbed(win2El, spec, {
-//       renderer: "canvas",
-//       actions: false,
-//     });
-
-//     wallEmbedResult.view.addEventListener("click", (_event, item) => {
-//       if (!item || item.mark.type !== "rect") return;
-//       const country = item.datum.country;
-//       const alreadySelected = selectedCountries.includes(country);
-//       selectedCountries = alreadySelected
-//         ? selectedCountries.filter((ctry) => ctry !== country)
-//         : [...selectedCountries, country];
-//       ch.postMessage({ type: "select", selectedCountries });
-//       renderWall();
-//     });
-//   }
-
-//   //0nly listen for selection changes from the map window
-//   ch.onmessage = (e) => {
-//     if (e.data.type === "select") {
-//       selectedCountries = e.data.selectedCountries || [];
-//       renderWall();
-//     }
-//   };
-
-//   await renderWall();
-
-//   let resizeTimer;
-//   window.addEventListener("resize", () => {
-//     clearTimeout(resizeTimer);
-//     resizeTimer = setTimeout(() => renderWall(), 200);
-//   });
-// }
-
 const windowType = document.body.dataset.window;
 if (windowType === "map") initMap();
 else if (windowType === "wall") initWall();
+else if (windowType === "choropleth") initChoropleth();
