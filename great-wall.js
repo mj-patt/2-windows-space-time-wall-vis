@@ -119,7 +119,8 @@ const CHANNEL_NAME = "great-wall";
 
 //mercator projection parameters must match buildMapSpec exactly
 //wall replicate the same projected x-coords without the map.
-const PROJ_CENTER = [7.75, 48.5]; //pan the map left/right/up/down
+// const PROJ_CENTER = [7.75, 48.5]; //pan the map left/right/up/down
+const PROJ_CENTER = [7.3, 48.5];
 const PROJ_SCALE_K = 1.65; // scale = width * PROJ_SCALE_K, zoom — bigger = more zoomed in
 const PROJ_TX_K = 0.5; // translateX = width * PROJ_TX_K, horizontal crop - shifts the whole map left/right
 const PROJ_TY_K = 1 / 2.7; // translateY = height * PROJ_TY_K, vertical crop - shifts the whole map up/down
@@ -196,7 +197,15 @@ function computeXCoords(width, height) {
 //chloropleth
 // window 3 (choropleth)
 
-function buildChoroplethSpec(topoData, unemploymentData, year, w, h) {
+function buildChoroplethSpec(
+  topoData,
+  unemploymentData,
+  year,
+  w,
+  h,
+  selectionMode = false,
+  selectedIds = []
+) {
   const rateByCountryName = {};
   unemploymentData
     .filter((d) => d.year === year)
@@ -208,6 +217,11 @@ function buildChoroplethSpec(topoData, unemploymentData, year, w, h) {
     id: String(id),
     rate: rateByCountryName[name] ?? null,
   }));
+
+  const selectedTest =
+    selectedIds.length > 0
+      ? selectedIds.map((id) => `datum.id === '${id}'`).join(" || ")
+      : "false";
 
   return {
     $schema: "https://vega.github.io/schema/vega/v5.json",
@@ -264,18 +278,25 @@ function buildChoroplethSpec(topoData, unemploymentData, year, w, h) {
       },
     ],
 
-    legends: [
-      {
-        fill: "color",
-        orient: "bottom-left",
-        title: "Unemployment Rate (%)",
-        direction: "horizontal",
-        titleFontSize: 11,
-        labelFontSize: 10,
-        gradientLength: 120,
-        gradientThickness: 12,
-      },
-    ],
+    legends: selectionMode
+      ? []
+      : [
+          {
+            fill: "color",
+            orient: "bottom-left",
+            title: "Unemployment Rate (%)",
+            direction: "horizontal",
+            // titleFontSize: 11,
+            // labelFontSize: 10,
+            // gradientLength: 120,
+            // gradientThickness: 12,
+            titleFontSize: 20,
+            titleLimit: 500,
+            labelFontSize: 20,
+            gradientLength: 500,
+            gradientThickness: 36,
+          },
+        ],
 
     marks: [
       {
@@ -297,16 +318,28 @@ function buildChoroplethSpec(topoData, unemploymentData, year, w, h) {
         transform: [{ type: "geoshape", projection: "proj" }],
         encode: {
           update: {
-            fill: [
-              { test: "datum.rate == null", value: "#b0bec5" },
-              { scale: "color", field: "rate" },
-            ],
-            stroke: { value: "#ffffff" },
-            strokeWidth: { value: 0.6 },
-            tooltip: {
-              signal:
-                "datum.rate != null ? {'Country': datum.properties.name, 'Year': selectedYear, 'Unemployment': format(datum.rate, '.1f') + '%'} : {'Country': datum.properties.name, 'Note': 'No data'}",
-            },
+            // fill: [
+            //   { test: "datum.rate == null", value: "#b0bec5" },
+            //   { scale: "color", field: "rate" },
+            // ],
+            // stroke: { value: "#ffffff" },
+            // strokeWidth: { value: 0.6 },
+            // tooltip: {
+            //   signal:
+            //     "datum.rate != null ? {'Country': datum.properties.name, 'Year': selectedYear, 'Unemployment': format(datum.rate, '.1f') + '%'} : {'Country': datum.properties.name, 'Note': 'No data'}",
+            // },
+            fill: selectionMode
+              ? [
+                  { test: selectedTest, value: "#a9d3ff" }, // selected = blue
+                  { value: "#4a5a6a" }, // unselected = dark gray
+                ]
+              : [
+                  { test: "datum.rate == null", value: "#b0bec5" },
+                  { scale: "color", field: "rate" },
+                ],
+            stroke: { value: selectionMode ? "#000000" : "#ffffff" },
+            strokeWidth: { value: selectionMode ? 0.7 : 0.6 },
+            cursor: { value: "pointer" },
           },
         },
       },
@@ -323,9 +356,12 @@ async function initChoropleth() {
   const containerEl = document.getElementById("win3");
   const sliderEl = document.getElementById("year-slider");
   const yearDisplayEl = document.getElementById("year-display");
-
+  const mapWrap = document.getElementById("map-wrap");
+  const ch = new BroadcastChannel(CHANNEL_NAME);
   let embedResult = null;
   let currentYear = 1994;
+  let selectedCountries = [];
+  let selectionMode = false;
 
   function getSizeChoro() {
     const headerHeight = document.getElementById("header").offsetHeight;
@@ -336,6 +372,13 @@ async function initChoropleth() {
     };
   }
 
+  function getSelectedIds() {
+    return selectedCountries
+      .map((name) => EU_COUNTRY_IDS[name])
+      .filter(Boolean)
+      .map(String);
+  }
+
   async function renderChoropleth() {
     const { w, h } = getSizeChoro();
 
@@ -344,21 +387,51 @@ async function initChoropleth() {
       unemploymentData,
       currentYear,
       w,
-      h
+      h,
+      selectionMode,
+      getSelectedIds()
     );
+    if (embedResult) embedResult.view.finalize();
 
-    if (embedResult) {
-      embedResult.view.finalize();
-    }
+    // if (embedResult) {
+    //   embedResult.view.finalize();
+    // }
 
-    containerEl.style.transform = "";
-    containerEl.style.transformOrigin = "";
+    // containerEl.style.transform = "";
+    // containerEl.style.transformOrigin = "";
 
     embedResult = await vegaEmbed(containerEl, spec, {
       renderer: "canvas",
       actions: false,
     });
+    // click to select — only COUNTRIES (wall countries) are selectable
+    embedResult.view.addEventListener("click", (_event, item) => {
+      if (!item || item.mark.name !== "choropleth") return;
+      const clickedId = item.datum.id;
+      const name = Object.entries(EU_COUNTRY_IDS).find(
+        ([, id]) => String(id) === String(clickedId)
+      )?.[0];
+      if (!name || !COUNTRIES.includes(name)) return;
+
+      const alreadySelected = selectedCountries.includes(name);
+      selectedCountries = alreadySelected
+        ? selectedCountries.filter((c) => c !== name)
+        : [...selectedCountries, name];
+
+      selectionMode = selectedCountries.length > 0;
+      ch.postMessage({ type: "select", selectedCountries });
+      renderChoropleth();
+    });
   }
+
+  // listen for selection changes from wall/map windows
+  ch.onmessage = (e) => {
+    if (e.data.type === "select") {
+      selectedCountries = e.data.selectedCountries || [];
+      selectionMode = selectedCountries.length > 0;
+      renderChoropleth();
+    }
+  };
 
   sliderEl.addEventListener("input", () => {
     currentYear = +sliderEl.value;
@@ -371,9 +444,7 @@ async function initChoropleth() {
   let resizeTimer;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      renderChoropleth();
-    }, 200);
+    resizeTimer = setTimeout(() => renderChoropleth(), 200);
   });
 }
 
@@ -395,7 +466,8 @@ function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
     $schema: "https://vega.github.io/schema/vega/v5.json",
     width: (containerWidth || 900) - 32 - 55 - 150,
     height: (containerHeight || 500) - 20 - 40,
-    padding: { left: 55, right: 150, top: 20, bottom: 40 },
+    // padding: { left: 55, right: 150, top: 20, bottom: 40 },
+    padding: { left: 75, right: 150, top: 20, bottom: 40 },
     autosize: "none",
     background: "#ffffff",
 
@@ -443,19 +515,23 @@ function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
         orient: "bottom",
         scale: "x",
         values: [1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022, 2024],
-        labelAngle: -45,
+        // labelAngle: -45,
         labelAlign: "right",
-        labelFontSize: 12,
+        // labelFontSize: 12,
+        labelFontSize: 20,
       },
       {
         orient: "left",
         scale: "y",
         tickCount: 7,
         grid: true,
-        gridColor: "#e0e0e0",
-        labelFontSize: 12,
+        // gridColor: "#e0e0e0",
+        gridColor: "#A9A9A9",
+        // labelFontSize: 12,
+        labelFontSize: 20,
         title: "Unemployment Rate (%)",
-        titleFontSize: 14,
+        // titleFontSize: 14,
+        titleFontSize: 24,
         titlePadding: 10,
       },
     ],
@@ -466,9 +542,11 @@ function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
         stroke: "color",
         orient: "right",
         title: null,
-        labelFontSize: 15,
+        // labelFontSize: 13,
+        labelFontSize: 20,
         symbolType: "stroke",
-        symbolStrokeWidth: 2,
+        // symbolStrokeWidth: 2,
+        symbolStrokeWidth: 20,
       },
     ],
 
@@ -491,7 +569,8 @@ function buildLineChartSpec(unemploymentData, containerWidth, containerHeight) {
                 x: { scale: "x", field: "year" },
                 y: { scale: "y", field: "rate" },
                 stroke: { scale: "color", field: "country" },
-                strokeWidth: { value: 1.5 },
+                // strokeWidth: { value: 1.5 },
+                strokeWidth: { value: 3.5 },
                 strokeOpacity: { value: 0.85 },
                 tooltip: {
                   signal:
@@ -584,7 +663,8 @@ function buildMapSpec(topoData, mapW, mapH, selectedCountries) {
 }
 
 // adjust to align wall points with map points
-const WALL_PADDING_LEFT = 0;
+// const WALL_PADDING_LEFT = 0;
+const WALL_PADDING_LEFT = 50;
 const WALL_PADDING_RIGHT = 50;
 
 function buildWallSpec(
@@ -660,7 +740,9 @@ function buildWallSpec(
           y: { value: nYears * brickH - brickH * 1.5 },
           align: { value: "center" },
           baseline: { value: "middle" },
-          fontSize: { value: Math.min(17, colW / 6) },
+          // fontSize: { value: Math.min(17, colW / 6) },
+          fontSize: { value: Math.min(17, colW) * 2 },
+
           fontWeight: { value: "bold" },
           fill: { value: "#ffffff" },
           // fill: { value: "#000000" },
