@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Window 2 – Wall</title>
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #ffffff; font-family: sans-serif; overflow: hidden; }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      
+    
+    }
+
+    h1 {
+      color: #000000;
+      /* font-size: 13px; */
+      font-size: 33px;
+      font-weight: bold;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      flex-shrink: 0;
+      padding-left: 55px;
+      padding-top: 25px;
+    }
+
+
+    #win2-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    #win2 { width: 100%; }
+
+  
+
+    .vega-embed .vega-actions { display: none; }
+  </style>
+</head>
+<body data-window="wall">
+  <div id="app">
+    <!-- <h1>Great Wall of Space–Time &nbsp;·&nbsp; Unemployment Rate 1994–2024</h1>
+    -->
+    <h1 id="win2-title">EU Unemployment Rate 1994–2024</h1>
+    <div id="win2-wrap"><div id="win2"></div></div>
+   
+  </div>
+  <script src="great-wall.js"></script>
+</body>
+</html>
