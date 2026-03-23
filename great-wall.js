@@ -283,18 +283,30 @@ function buildChoroplethSpec(
       : [
           {
             fill: "color",
+<<<<<<< HEAD
             orient: "bottom-right",
+=======
+            orient: "bottom-left",
+>>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
             title: "Unemployment Rate (%)",
             direction: "horizontal",
             // titleFontSize: 11,
             // labelFontSize: 10,
             // gradientLength: 120,
             // gradientThickness: 12,
+<<<<<<< HEAD
             titleFontSize: 15,
             titleLimit: 500,
             labelFontSize: 15,
             gradientLength: 250,
             gradientThickness: 20,
+=======
+            titleFontSize: 20,
+            titleLimit: 500,
+            labelFontSize: 20,
+            gradientLength: 500,
+            gradientThickness: 36,
+>>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
           },
         ],
 
@@ -664,8 +676,13 @@ function buildMapSpec(topoData, mapW, mapH, selectedCountries) {
 
 // adjust to align wall points with map points
 // const WALL_PADDING_LEFT = 0;
+<<<<<<< HEAD
 const WALL_PADDING_LEFT = 30;
 const WALL_PADDING_RIGHT = 30;
+=======
+const WALL_PADDING_LEFT = 50;
+const WALL_PADDING_RIGHT = 50;
+>>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
 
 function buildWallSpec(
   xCoords,
@@ -741,7 +758,11 @@ function buildWallSpec(
           align: { value: "center" },
           baseline: { value: "middle" },
           // fontSize: { value: Math.min(17, colW / 6) },
+<<<<<<< HEAD
           fontSize: { value: Math.min(20, colW)},
+=======
+          fontSize: { value: Math.min(17, colW) * 2 },
+>>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
 
           fontWeight: { value: "bold" },
           fill: { value: "#ffffff" },
