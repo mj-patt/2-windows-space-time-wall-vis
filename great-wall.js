@@ -283,30 +283,18 @@ function buildChoroplethSpec(
       : [
           {
             fill: "color",
-<<<<<<< HEAD
             orient: "bottom-right",
-=======
-            orient: "bottom-left",
->>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
             title: "Unemployment Rate (%)",
             direction: "horizontal",
             // titleFontSize: 11,
             // labelFontSize: 10,
             // gradientLength: 120,
             // gradientThickness: 12,
-<<<<<<< HEAD
             titleFontSize: 15,
             titleLimit: 500,
             labelFontSize: 15,
             gradientLength: 250,
             gradientThickness: 20,
-=======
-            titleFontSize: 20,
-            titleLimit: 500,
-            labelFontSize: 20,
-            gradientLength: 500,
-            gradientThickness: 36,
->>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
           },
         ],
 
@@ -448,6 +436,217 @@ async function initChoropleth() {
   sliderEl.addEventListener("input", () => {
     currentYear = +sliderEl.value;
     yearDisplayEl.textContent = currentYear;
+    renderChoropleth();
+  });
+
+  await renderChoropleth();
+
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => renderChoropleth(), 200);
+  });
+}
+
+function buildChoroplethSpecSmall(
+  topoData,
+  unemploymentData,
+  year,
+  w,
+  h,
+  selectionMode = false,
+  selectedIds = []
+) {
+  const rateByCountryName = {};
+  unemploymentData
+    .filter((d) => d.year === year)
+    .forEach((d) => {
+      rateByCountryName[d.country] = d.rate;
+    });
+
+  const rateValues = Object.entries(EU_COUNTRY_IDS).map(([name, id]) => ({
+    id: String(id),
+    rate: rateByCountryName[name] ?? null,
+  }));
+
+  const selectedTest =
+    selectedIds.length > 0
+      ? selectedIds.map((id) => `datum.id === '${id}'`).join(" || ")
+      : "false";
+
+  return {
+    $schema: "https://vega.github.io/schema/vega/v5.json",
+    width: w,
+    height: h,
+    autosize: "none",
+    background: "#dce8f0",
+
+    signals: [{ name: "selectedYear", value: year }],
+
+    data: [
+      {
+        name: "countries",
+        values: topoData,
+        format: { type: "topojson", feature: "countries" },
+      },
+      {
+        name: "rates",
+        values: rateValues,
+      },
+      {
+        name: "joined",
+        source: "countries",
+        transform: [
+          {
+            type: "lookup",
+            from: "rates",
+            key: "id",
+            fields: ["id"],
+            values: ["rate"],
+            as: ["rate"],
+          },
+        ],
+      },
+    ],
+
+    projections: [
+      {
+        name: "proj",
+        type: "mercator",
+        center: PROJ_CENTER2,
+        scale: w * PROJ_SCALE_K2,
+        translate: [w * PROJ_TX_K2, h * PROJ_TY_K2],
+      },
+    ],
+
+    scales: [
+      {
+        name: "color",
+        type: "sequential",
+        domain: [0, 30],
+        range: { scheme: "orangered" },
+        zero: true,
+      },
+    ],
+
+    legends: [],
+
+    marks: [
+      {
+        type: "shape",
+        from: { data: "countries" },
+        transform: [{ type: "geoshape", projection: "proj" }],
+        encode: {
+          enter: {
+            fill: { value: "#b0bec5" },
+            stroke: { value: "#ffffff" },
+            strokeWidth: { value: 0.5 },
+          },
+        },
+      },
+      {
+        name: "choropleth",
+        type: "shape",
+        from: { data: "joined" },
+        transform: [{ type: "geoshape", projection: "proj" }],
+        encode: {
+          update: {
+            fill: selectionMode
+              ? [{ test: selectedTest, value: "#a9d3ff" }, { value: "#4a5a6a" }]
+              : [
+                  { test: "datum.rate == null", value: "#b0bec5" },
+                  { scale: "color", field: "rate" },
+                ],
+            stroke: { value: selectionMode ? "#000000" : "#ffffff" },
+            strokeWidth: { value: selectionMode ? 0.7 : 0.6 },
+            cursor: { value: "pointer" },
+          },
+        },
+      },
+    ],
+  };
+}
+
+async function initChoroplethSmall() {
+  const [topoData, unemploymentData] = await Promise.all([
+    loadTopoJSON(),
+    loadUnemploymentChoropleth(),
+  ]);
+
+  const containerEl = document.getElementById("win3");
+  const sliderEl = document.getElementById("year-slider");
+  const panelYearEl = document.getElementById("panel-year");
+  const ch = new BroadcastChannel(CHANNEL_NAME);
+  let embedResult = null;
+  let currentYear = 1994;
+  let selectedCountries = [];
+  let selectionMode = false;
+
+  function getSizeChoro() {
+    const leftCol = document.getElementById("left-col");
+    const sliderHeight = document.getElementById("slider-wrap").offsetHeight;
+    const colW = leftCol ? leftCol.clientWidth : window.innerWidth * 0.75;
+    const colH = leftCol ? leftCol.clientHeight : window.innerHeight;
+    return {
+      w: colW,
+      h: colH - sliderHeight,
+    };
+  }
+
+  function getSelectedIds() {
+    return selectedCountries
+      .map((name) => EU_COUNTRY_IDS[name])
+      .filter(Boolean)
+      .map(String);
+  }
+
+  async function renderChoropleth() {
+    const { w, h } = getSizeChoro();
+    const spec = buildChoroplethSpecSmall(
+      topoData,
+      unemploymentData,
+      currentYear,
+      w,
+      h,
+      selectionMode,
+      getSelectedIds()
+    );
+    if (embedResult) embedResult.view.finalize();
+    embedResult = await vegaEmbed(containerEl, spec, {
+      renderer: "canvas",
+      actions: false,
+    });
+
+    embedResult.view.addEventListener("click", (_event, item) => {
+      if (!item || item.mark.name !== "choropleth") return;
+      const clickedId = item.datum.id;
+      const name = Object.entries(EU_COUNTRY_IDS).find(
+        ([, id]) => String(id) === String(clickedId)
+      )?.[0];
+      if (!name || !COUNTRIES.includes(name)) return;
+
+      const alreadySelected = selectedCountries.includes(name);
+      selectedCountries = alreadySelected
+        ? selectedCountries.filter((c) => c !== name)
+        : [...selectedCountries, name];
+
+      selectionMode = selectedCountries.length > 0;
+      ch.postMessage({ type: "select", selectedCountries });
+      renderChoropleth();
+    });
+  }
+
+  ch.onmessage = (e) => {
+    if (e.data.type === "select") {
+      selectedCountries = e.data.selectedCountries || [];
+      selectionMode = selectedCountries.length > 0;
+      renderChoropleth();
+    }
+  };
+
+  sliderEl.addEventListener("input", () => {
+    currentYear = +sliderEl.value;
+    if (panelYearEl) panelYearEl.textContent = currentYear;
     renderChoropleth();
   });
 
@@ -676,13 +875,8 @@ function buildMapSpec(topoData, mapW, mapH, selectedCountries) {
 
 // adjust to align wall points with map points
 // const WALL_PADDING_LEFT = 0;
-<<<<<<< HEAD
 const WALL_PADDING_LEFT = 30;
 const WALL_PADDING_RIGHT = 30;
-=======
-const WALL_PADDING_LEFT = 50;
-const WALL_PADDING_RIGHT = 50;
->>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
 
 function buildWallSpec(
   xCoords,
@@ -758,11 +952,7 @@ function buildWallSpec(
           align: { value: "center" },
           baseline: { value: "middle" },
           // fontSize: { value: Math.min(17, colW / 6) },
-<<<<<<< HEAD
-          fontSize: { value: Math.min(20, colW)},
-=======
-          fontSize: { value: Math.min(17, colW) * 2 },
->>>>>>> c96788f9d46de7eb5ceadcf4b3dd524649bb785f
+          fontSize: { value: Math.min(20, colW) },
 
           fontWeight: { value: "bold" },
           fill: { value: "#ffffff" },
@@ -968,7 +1158,13 @@ async function initWall() {
   });
 }
 
+// const windowType = document.body.dataset.window;
+// if (windowType === "map") initMap();
+// else if (windowType === "wall") initWall();
+// else if (windowType === "choropleth") initChoropleth();
+
 const windowType = document.body.dataset.window;
 if (windowType === "map") initMap();
 else if (windowType === "wall") initWall();
 else if (windowType === "choropleth") initChoropleth();
+else if (windowType === "choropleth-small") initChoroplethSmall();
